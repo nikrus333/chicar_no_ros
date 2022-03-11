@@ -1,16 +1,13 @@
 #!/usr/bin/python3
 
 import motorcortex
-import cv2 as cv
 import mcx_tracking_cam_pb2 as tracking_cam_msg
 import os
 import serial
-from math import cos, sin, sqrt
-import numpy as np
-
+import time
 class tc3():
     def __init__(self):
-        self.data = None
+        self.data = [0, 0, 0]
 
         # Creating empty object for parameter tree
         parameter_tree = motorcortex.ParameterTree()
@@ -24,45 +21,23 @@ class tc3():
                                     certificate=dir_path+"/motorcortex.crt", timeout_ms=1000,
                                     login="root", password="vectioneer")
 
-        self.subscription6 = self.sub.subscribe(["root/Comm_task/utilization_max","root/Processing/image"], "camera", 1)
-        self.subscription6.get()
-        self.subscription6.notify(self.onImage)
         self.shape = 0
         # #self.out = cv2.VideoWriter("output.avi", cv2.VideoWriter_fourcc(*"MJPG"), 1,(640,480))
         
-        # self.subscription2 = self.sub.subscribe(["root/Processing/BlobDetector/blobBuffer"], "blob", 1)
-        # self.subscription2.get()
-        # self.subscription2.notify(self.onBlob)
-        # self.BlobsBlobs = tracking_cam_msg.Blobs
+        self.subscription2 = self.sub.subscribe(["root/Processing/BlobDetector/blobBuffer"], "blob", 1)
+        self.subscription2.get()
+        self.subscription2.notify(self.onBlob)
 
-        self.subscription4 = self.sub.subscribe(["root/Processing/BlobDetectorNew/blobBuffer"], "blob", 1)
-        self.subscription4.get()
-        self.subscription4.notify(self.onBlobNew)
 
-    
-    # def onBlob(self,val):
-    #     print("find blob")
-    #     try:
-    #         blobs = tracking_cam_msg.Blobs()
-    #         if blobs.ParseFromString(val[0].value):
-    #             print(blobs.value)
-    #             self.data = blobs.value
-    #     except Exception as e:
-    #         print(e)
-
-    def onImage(self,val):
-        frame = cv.imdecode(np.frombuffer(val[1].value, np.uint8), -1)
-        image_original = frame
-        self.shape = frame.shape
-        cv.waitKey(1)
-
-    def onBlobNew(self,val):
-        # print("find new blob")
+    def onBlob(self,val):
         try:
             blobs = tracking_cam_msg.Blobs()
             if blobs.ParseFromString(val[0].value):
-                print(blobs.value)
-                self.data = blobs.value
+                #print('blob.value', blobs.value)
+                self.data[0] = blobs.value[0].cx
+                self.data[1] = blobs.value[0].cy
+                self.data[2] = blobs.value[0].area
+                #print(self.data)
             else:
                 self.data =  None
         except Exception as e:
@@ -71,7 +46,7 @@ class tc3():
 class SerialUSB():
     def __init__(self):
         self.ser = serial.Serial(
-                port='/dev/ttyACM0',
+                port='/dev/ttyACM1',
                 baudrate=115200)
     
     def write_data(self, data):
@@ -89,23 +64,14 @@ class Car():
         self.len_base_car = 0.17
         self.len_mass_c = 0.08  
         self.radius_whell = 0.0325
-        self.shape_image = 320 # 240
-    
-    def tracking_red(self, data): # red color blob nomber 1, no 0   
-        for index in range(len(data)):  
-            if data[index].id == 0:
-                cx = data[index].cx
-                cy = data[index].cy    
-                return [cx, cy] 
-            else:
-                return [None, None]
+        self.shape_image = 640 # 240
 
     def turn_red(self, data): #fix controller
-        if  data[0] >= self.shape_image / 2 :
+        if  data >= self.shape_image / 2 :
             flag_right = True
         else:
             flag_right = False
-        cx = data[0]
+        cx = data
         kp = 30 / 80
         if flag_right == True:
             err =  cx - self.shape_image / 2 
@@ -122,6 +88,14 @@ class Car():
         
         return turn
 
+    def move_forward(self, data): #fix controller
+        if  data <= 1700:
+            move = 70
+        else:
+            move = -40
+            
+        return move
+
 
 if __name__ == '__main__':
     tc3_ex = tc3()
@@ -129,19 +103,20 @@ if __name__ == '__main__':
     car = Car()
     while True:
         try:     
-            
             #print(serial_1.read_data())
-            #print(tc3_ex.data[0].id)
-            blob_coord = car.tracking_red(tc3_ex.data)
-            #print(blob_coord)
-            turn = car.turn_red(blob_coord)
-            print(turn)
-            data = [0, turn]
+            print('cx = ', tc3_ex.data[0])
+            print('area = ', tc3_ex.data[2])
+            turn_car = car.turn_red(tc3_ex.data[0])
+            
+            move_car = car.move_forward(tc3_ex.data[2])
+            data = [0, 0]
+            #print(data)
             serial_1.write_data(data)
             #print(tc3_ex.shape)
             print('----------------------------------------')
+            time.sleep(0.1)
         except Exception as e:
             print(e)
             # print(e)
-            # tc3_ex.req.close()
-            # tc3_ex.sub.close()
+            tc3_ex.req.close()
+            tc3_ex.sub.close()
